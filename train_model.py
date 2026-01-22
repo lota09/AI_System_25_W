@@ -8,11 +8,13 @@ import os
 
 # --- Configuration ---
 TRAIN_CSV = r"c:\Users\lota\Developments\AISys_25_W\term_project\train_data.csv"
+WEAK_CLASS_CSV = r".\train_data_weak.csv"  # New weak class data
 TEST_CSV = r"c:\Users\lota\Developments\AISys_25_W\term_project\test_data.csv"
 MODEL_SAVE_PATH = r".\models\best_model.pth"
 BATCH_SIZE = 32
 EPOCHS = 50
 LEARNING_RATE = 0.001
+OVERSAMPLING_FACTOR = 4  # Multiply weak data by 50x
 
 # Mapping inputs labels to 0-9 index
 # Labels in CSV are "1", "2", ... "10"
@@ -21,8 +23,29 @@ LABEL_MAP = {str(i): i - 1 for i in range(1, 11)}
 
 
 class HandLandmarkDataset(Dataset):
-    def __init__(self, csv_file):
+    def __init__(self, csv_file, weak_csv_file=None, oversampling_factor=1):
+        # 1. Load Main Data
         self.data = pd.read_csv(csv_file)
+
+        # 2. Load Weak Data & Oversample
+        if weak_csv_file and os.path.exists(weak_csv_file):
+            weak_data = pd.read_csv(weak_csv_file)
+            if not weak_data.empty:
+                print(
+                    f"  Found {len(weak_data)} weak samples. Oversampling {oversampling_factor}x..."
+                )
+                # Replicate weak data
+                weak_data_oversampled = pd.concat(
+                    [weak_data] * oversampling_factor, ignore_index=True
+                )
+                # Merge with main data
+                self.data = pd.concat(
+                    [self.data, weak_data_oversampled], ignore_index=True
+                )
+                print(f"  Total training samples after merging: {len(self.data)}")
+            else:
+                print("  Weak data file is empty.")
+
         self.labels = self.data.iloc[:, 0].astype(str).values
         self.features = self.data.iloc[:, 1:].values.astype(np.float32)
 
@@ -31,7 +54,12 @@ class HandLandmarkDataset(Dataset):
 
     def __getitem__(self, idx):
         label_str = self.labels[idx]
-        label = LABEL_MAP[label_str]
+        try:
+            label = LABEL_MAP[label_str]
+        except KeyError:
+            # Fallback for unexpected labels (e.g. if capture tool saved '0' or '11')
+            label = 0
+
         features = torch.tensor(self.features[idx])
         return features, torch.tensor(label, dtype=torch.long)
 
@@ -61,7 +89,8 @@ def train():
 
     # Load Data
     print("Loading datasets...")
-    train_dataset = HandLandmarkDataset(TRAIN_CSV)
+    # Apply Oversampling only to Train set
+    train_dataset = HandLandmarkDataset(TRAIN_CSV, WEAK_CLASS_CSV, OVERSAMPLING_FACTOR)
     test_dataset = HandLandmarkDataset(TEST_CSV)
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)

@@ -30,13 +30,13 @@ class HandGestureModel(nn.Module):
         return x
 
 
-# --- Alignment Function (Method 2: NO Rotation) ---
+# --- Alignment Function (Method 1: Rotation + Translation + Scale) ---
 def align_landmarks(landmarks):
     """
     Aligns hand landmarks by:
     1. Translating wrist (0) to origin (0,0,0)
-    2. Scaling based on distance 0->9
-    3. NO ROTATION
+    2. ROTATING so vector 0->9 (Middle Finger MCP) aligns with negative Y-axis (Up)
+    3. Normalizing size based on distance 0->9
     """
     coords = np.array([[lm.x, lm.y, lm.z] for lm in landmarks])
 
@@ -44,9 +44,22 @@ def align_landmarks(landmarks):
     wrist = coords[0]
     coords -= wrist
 
-    # 2. Scaling
+    # 2. Rotation: Align 0->9 vector to Y-axis
     v_0_9 = coords[9]
-    dist_0_9 = np.linalg.norm(v_0_9)
+
+    # Calculate angle to rotate (target: -90 degrees / pointing up)
+    target_angle = -np.pi / 2
+    current_angle = np.arctan2(v_0_9[1], v_0_9[0])  # Angle from X-axis
+    rotation_angle = target_angle - current_angle
+
+    c, s = np.cos(rotation_angle), np.sin(rotation_angle)
+    R = np.array(((c, -s), (s, c)))
+
+    # Apply rotation to X, Y
+    coords[:, :2] = np.dot(coords[:, :2], R.T)
+
+    # 3. Scaling
+    dist_0_9 = np.linalg.norm(coords[9])  # Re-calc after rotation
     if dist_0_9 > 0:
         scale = 1.0 / dist_0_9
         coords *= scale
